@@ -214,29 +214,57 @@ uns64 memsys_access_modeA(Memsys *sys, Addr lineaddr, Access_Type type, uns core
   return 0;
 }
 
-
-uns64 memsys_access_modeBC(Memsys *sys, Addr lineaddr, Access_Type type,uns core_id){
-uns64 delay=0;
-     
-  if(type == ACCESS_TYPE_IFETCH){
-    // YOU NEED TO WRITE THIS PART AND UPDATE DELAY
+static inline bool is_writeback(Cache*c,uns core_id){  //dirty evicted writeback!
+  return c->last_evicted_line.valid && c->last_evicted_line.core_id==core_id && c->last_evicted_line.dirty;
+}  
+static inline uns64 memsys_DCACHE_access(Memsys *sys, Addr lineaddr, uns is_write, uns core_id){
+  uns64 delay=DCACHE_HIT_LATENCY;
+  Flag outcome=cache_access(sys->dcache, lineaddr, is_write, core_id);
+  if(outcome==MISS){
+    cache_install(sys->dcache, lineaddr, is_write, core_id);                   
+    if(is_writeback(sys->dcache,core_id)){
+      memsys_L2_access(sys,sys->icache->last_evicted_line.tag,true,core_id);	 //write back the dirty evicted line to L2 dirty line keep being dirty (no writeback delay)
+    }
+    delay+=memsys_L2_access(sys,lineaddr,is_write,core_id);  //store or load cache access! store miss will trigger dirty line allocation in L2             
   }
-    
-  if(type == ACCESS_TYPE_LOAD){
-    // YOU NEED TO WRITE THIS PART AND UPDATE DELAY
-  }
-  
-
-  if(type == ACCESS_TYPE_STORE){
-    // YOU NEED TO WRITE THIS PART AND UPDATE DELAY
-  }
- 
   return delay;
 }
-
+static inline uns64 memsys_ICACHE_access(Memsys *sys, Addr lineaddr, uns core_id){
+  uns64 delay=ICACHE_HIT_LATENCY;
+  Flag outcome=cache_access(sys->icache, lineaddr, false, core_id);
+  if(outcome==MISS){
+    cache_install(sys->icache, lineaddr, false, core_id);
+    if(is_writeback(sys->icache,core_id)){
+      memsys_L2_access(sys,sys->icache->last_evicted_line.tag,true,core_id);	 //write back dirty evicted line to L2
+    }
+    delay+=memsys_L2_access(sys,lineaddr,false,core_id);  //fetch always read
+  }
+  return delay;
+}  
+uns64 memsys_access_modeBC(Memsys *sys, Addr lineaddr, Access_Type type,uns core_id){
+  if(type == ACCESS_TYPE_IFETCH){
+    return memsys_ICACHE_access(sys,lineaddr,core_id);
+  }
+  if(type == ACCESS_TYPE_LOAD){
+    return memsys_DCACHE_access(sys,lineaddr, false, core_id);
+  }
+  if(type == ACCESS_TYPE_STORE){
+    return memsys_DCACHE_access(sys,lineaddr, true, core_id);
+  }
+}
+//is_writeback denotes L1 writeback to L2! Make the evicted line invalid then!
 uns64   memsys_L2_access(Memsys *sys, Addr lineaddr, Flag is_writeback, uns core_id){
   uns64 delay = L2CACHE_HIT_LATENCY;
-
+  Flag outcome=cache_access(sys->l2cache, lineaddr, is_writeback, core_id);
+  if(outcome==MISS){ 
+    cache_install(sys->l2cache, lineaddr, is_writeback, core_id);
+    if(is_writeback(sys->l2cache,core_id)){   // there exists dirty evicted which needs to be written back
+      dram_access(sys,sys->l2cache->last_evicted_line.tag, true);	 //write back dirty evicted line to dram
+    }
+    if(!is_writeback){ //if it is a read miss, then access dram; if it is a write miss, there is no need to access DRAM
+      delay+=dram_access(sys->dram, lineaddr, false);
+    }
+  }
   //To get the delay of L2 MISS, you must use the dram_access() function
   //To perform writebacks to memory, you must use the dram_access() function
   //This will help us track your memory reads and memory writes

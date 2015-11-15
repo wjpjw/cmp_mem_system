@@ -24,7 +24,6 @@ Cache  *cache_new(uns64 size, uns64 assoc, uns64 linesize, uns64 repl_policy){
    // determine num sets, and init the cache
    c->num_sets = size/(linesize*assoc);
    c->sets  = (Cache_Set *) calloc (c->num_sets, sizeof(Cache_Set));
-
    return c;
 }
 
@@ -73,8 +72,8 @@ static inline int     index_bit(Cache* c){
   }
   return -1;
 }
-static inline Addr     tag_of_addr(Cache* c, Addr addr){
-  addr>>=(index_bit(c));  // unsigned >> will assign 0
+static inline Addr     tag_of_addr(Cache* c, Addr addr){   //there is no need to shift
+  //addr>>=(index_bit(c));  // unsigned >> will assign 0
   return addr;
 }  
 static inline uns      index_of_addr(Cache*c, Addr addr){
